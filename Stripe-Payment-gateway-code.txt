@@ -1,0 +1,158 @@
+####################################
+Integrating Stripe Payment gateway
+###################################
+
+Step 1: pom.xml file
+---------------------
+
+		<dependency>
+			<groupId>com.stripe</groupId>
+			<artifactId>stripe-java</artifactId>
+			<version>24.3.0-beta.1</version>
+		</dependency>
+
+Step 2: Create ProductRequest.java (DTO)
+----------------------------------------
+
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@AllArgsConstructor
+@NoArgsConstructor
+public class ProductRequest {
+    private Long amount;
+    private Long quantity;
+    private String name;
+    private String currency;
+}
+
+Step 3: StripeResponse.java (DTO)
+---------------
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@AllArgsConstructor
+@NoArgsConstructor
+@Builder
+public class StripeResponse {
+
+    private String status;
+    private String message;
+    private String sessionId;
+    private String sessionUrl;
+}
+
+Step 4: application.properties file
+-----------------------
+spring.application.name=stripe-payment
+
+stripe.secretKey=<PROVIDE YOUR KEY>
+
+Step 5:StripeService (Service layer)
+-------------------------------------
+import com.stripe.Stripe;
+import com.stripe.exception.StripeException;
+import com.stripe.model.checkout.Session;
+import com.stripe.param.checkout.SessionCreateParams;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
+@Service
+public class StripeService {
+
+    @Value("${stripe.secretKey}")
+    private String secretKey;
+
+    //stripe -API
+    //-> productName , amount , quantity , currency
+    //-> return sessionId and url
+
+
+
+        public StripeResponse checkoutProducts(ProductRequest productRequest) {
+            // Set your secret key. Remember to switch to your live secret key in production!
+            Stripe.apiKey = secretKey;
+
+            // Create a PaymentIntent with the order amount and currency
+            SessionCreateParams.LineItem.PriceData.ProductData productData =
+                    SessionCreateParams.LineItem.PriceData.ProductData.builder()
+                            .setName(productRequest.getName())
+                            .build();
+
+            // Create new line item with the above product data and associated price
+            SessionCreateParams.LineItem.PriceData priceData =
+                    SessionCreateParams.LineItem.PriceData.builder()
+                            .setCurrency(productRequest.getCurrency() != null ? productRequest.getCurrency() : "USD")
+                            .setUnitAmount(productRequest.getAmount())
+                            .setProductData(productData)
+                            .build();
+
+            // Create new line item with the above price data
+            SessionCreateParams.LineItem lineItem =
+                    SessionCreateParams
+                            .LineItem.builder()
+                            .setQuantity(productRequest.getQuantity())
+                            .setPriceData(priceData)
+                            .build();
+
+            // Create new session with the line items
+            SessionCreateParams params =
+                    SessionCreateParams.builder()
+                            .setMode(SessionCreateParams.Mode.PAYMENT)
+                            .setSuccessUrl("http://localhost:8080/success")
+                            .setCancelUrl("http://localhost:8080/cancel")
+                            .addLineItem(lineItem)
+                            .build();
+
+            // Create new session
+            Session session = null;
+            try {
+                session = Session.create(params);
+            } catch (StripeException e) {
+                //log the error
+            }
+
+            return StripeResponse
+                    .builder()
+                    .status("SUCCESS")
+                    .message("Payment session created ")
+                    .sessionId(session.getId())
+                    .sessionUrl(session.getUrl())
+                    .build();
+        }
+
+}
+
+Step 6: Create Controller - ProductCheckoutController.java
+--------------------------------
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+@RequestMapping("/product/v1")
+public class ProductCheckoutController {
+
+
+    private StripeService stripeService;
+
+    public ProductCheckoutController(StripeService stripeService) {
+        this.stripeService = stripeService;
+    }
+
+    @PostMapping("/checkout")
+    public ResponseEntity<StripeResponse> checkoutProducts(@RequestBody ProductRequest productRequest) {
+        StripeResponse stripeResponse = stripeService.checkoutProducts(productRequest);
+        return ResponseEntity
+                .status(HttpStatus.OK)
+                .body(stripeResponse);
+    }
+}
